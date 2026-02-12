@@ -1,0 +1,38 @@
+model:
+  top_n: 7
+  candidate_k: 300
+
+weights:
+  financial: 0.60
+  geographic: 0.30
+  categorical: 0.10
+
+geography:
+  market_overlap_weight: 0.80
+  concentration_weight: 0.20
+  both_missing_score: 0.50
+  one_missing_score: 0.25
+
+categorical_weights:
+  charter_type: 0.50
+  holding_company: 0.30
+  specialty_group: 0.20
+
+driver_thresholds:
+  size_pct_diff_max: 0.35
+  loan_to_deposit_abs_diff_max: 0.15
+  growth_abs_diff_max: 0.03
+  overlap_for_strong_geo: 0.50
+
+numeric_feature_weights:
+  log_total_assets: 1.20
+  log_total_deposits: 1.00
+  log_total_loans: 1.00
+  loans_to_assets: 0.80
+  deposits_to_assets: 0.80
+  loan_to_deposit_ratio: 0.70
+  asset_growth_cagr_5y: 0.20
+  core_deposits_per_fte_ttm: 0.15
+  avg_3y_assets_yoy_growth: 0.15
+  avg_3y_deposits_yoy_growth: 0.15
+  avg_3y_loans_yoy_growth: 0.15

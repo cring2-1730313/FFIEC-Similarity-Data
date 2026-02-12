@@ -1,0 +1,69 @@
+files:
+  land: Land___Clean_FFIEC_Data.csv
+  locations: Locations__Bank_Suite_.csv
+  institutions: Institutions__Bank_Suite_.csv
+
+identifiers:
+  bank_id: IDRSSD
+  institution_rssd: FED_RSSD
+  cert: CERT
+
+names:
+  land_name: Financial_Institution_Name
+  institution_name: NAME
+
+dates:
+  land_report_date: Reporting_Period_End_Date
+  institution_report_date: REPDTE
+  institution_run_date: RUNDATE
+  location_run_date: RUNDATE
+
+financial:
+  total_assets: Total_Assets
+  total_deposits: Total_Deposits
+  total_loans: Total_Net_Loans_And_Leases
+  loan_to_deposit_ratio: LOAN_TO_DEPOSIT_RATIO_QTR
+  asset_growth_cagr_5y: ASSET_GROWTH_CAGR_5Y
+  core_deposits_per_fte: CORE_DEPOSITS_PER_FTE_TTM
+  asset_size_bucket: ASSET_SIZE_BUCKET
+
+lending_profile:
+  cre:
+    - CRE_Loans
+    - CRE_LOANS
+    - Commercial_Real_Estate_Loans
+  ci:
+    - C_I_Loans
+    - C_AND_I_LOANS
+    - Commercial_Industrial_Loans
+  residential_mortgage:
+    - Residential_Mortgage_Loans
+    - RESIDENTIAL_MORTGAGE_LOANS
+  consumer:
+    - Consumer_Loans
+    - CONSUMER_LOANS
+  agricultural:
+    - Agricultural_Loans
+    - AGRICULTURAL_LOANS
+  construction:
+    - Construction_Development_Loans
+    - CONSTRUCTION_DEVELOPMENT_LOANS
+
+deposit_mix:
+  retail:
+    - Retail_Deposits
+    - RETAIL_DEPOSITS
+  business:
+    - Business_Deposits
+    - BUSINESS_DEPOSITS
+
+institutional:
+  charter_type: CHARTER
+  holding_company_rssd: RSSDHCR
+  specialty_group: SPECGRPN
+  bank_class: BKCLASS
+
+geography:
+  market_code: CBSA_NO
+  latitude: LATITUDE
+  longitude: LONGITUDE

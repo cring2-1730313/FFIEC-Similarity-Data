@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Raw source data (very large, local only)
+Land___Clean_FFIEC_Data.csv
+Locations__Bank_Suite_.csv
+Institutions__Bank_Suite_.csv
+
+# Generated outputs
+similar_banks/output/
