@@ -24,15 +24,40 @@ def _normalize_numeric_id(df: pd.DataFrame, column: str) -> None:
         df[column] = pd.to_numeric(df[column], errors="coerce").astype("Int64")
 
 
+def _parse_mixed_datetime(series: pd.Series) -> pd.Series:
+    raw = series.copy()
+    parsed = pd.to_datetime(raw, errors="coerce")
+    numeric = pd.to_numeric(raw, errors="coerce")
+    yyyymmdd_mask = numeric.notna() & numeric.between(19000101, 21991231)
+    if yyyymmdd_mask.any():
+        yyyymmdd = numeric[yyyymmdd_mask].round().astype("Int64").astype(str)
+        parsed.loc[yyyymmdd_mask] = pd.to_datetime(
+            yyyymmdd, format="%Y%m%d", errors="coerce"
+        )
+    return parsed
+
+
 def _normalize_datetime(df: pd.DataFrame, column: str) -> None:
     if column in df.columns:
-        df[column] = pd.to_datetime(df[column], errors="coerce")
+        df[column] = _parse_mixed_datetime(df[column])
+
+
+def _read_table(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        return pd.read_parquet(path)
+    if suffix in {".csv", ".txt"}:
+        return pd.read_csv(path, low_memory=False)
+    raise ValueError(f"Unsupported file extension for {path}")
 
 
 def load_source_data(data_dir: Path, mappings: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
     files = mappings["files"]
+    financial_filename = files.get("financial_history", files.get("land"))
+    if not financial_filename:
+        raise KeyError("column_mappings.yaml must define files.financial_history or files.land")
     paths = {
-        "land": data_dir / files["land"],
+        "land": data_dir / financial_filename,
         "locations": data_dir / files["locations"],
         "institutions": data_dir / files["institutions"],
     }
@@ -41,9 +66,9 @@ def load_source_data(data_dir: Path, mappings: Dict[str, Any]) -> Dict[str, pd.D
             raise FileNotFoundError(f"Missing source file for {label}: {path}")
 
     return {
-        "land": pd.read_csv(paths["land"], low_memory=False),
-        "locations": pd.read_csv(paths["locations"], low_memory=False),
-        "institutions": pd.read_csv(paths["institutions"], low_memory=False),
+        "land": _read_table(paths["land"]),
+        "locations": _read_table(paths["locations"]),
+        "institutions": _read_table(paths["institutions"]),
     }
 
 
@@ -108,7 +133,13 @@ def prepare_snapshots(
 
     institutions_latest = (
         institutions.dropna(subset=[institution_rssd_col])
-        .sort_values([institution_rssd_col, institution_date_col, institution_run_date_col])
+        .sort_values(
+            [
+                c
+                for c in [institution_rssd_col, institution_date_col, institution_run_date_col]
+                if c in institutions.columns
+            ]
+        )
         .groupby(institution_rssd_col, as_index=False)
         .tail(1)
         .copy()
@@ -122,6 +153,12 @@ def prepare_snapshots(
         suffixes=("_land", "_inst"),
     )
 
+    if cert_col not in bank_base.columns:
+        cert_candidates = [f"{cert_col}_inst", f"{cert_col}_land", cert_col]
+        chosen_cert = next((c for c in cert_candidates if c in bank_base.columns), None)
+        if chosen_cert is not None:
+            bank_base[cert_col] = bank_base[chosen_cert]
+
     locations = locations.dropna(subset=[cert_col]).copy()
     location_cert_set = set(locations[cert_col].dropna().astype("int64"))
 
@@ -129,8 +166,9 @@ def prepare_snapshots(
     location_match_count = int(
         bank_base[cert_col].dropna().astype("int64").isin(location_cert_set).sum()
     )
-    logger.info("Latest land report date: %s", latest_land_date.date())
-    logger.info("Land latest banks: %d", len(land_latest))
+    latest_str = latest_land_date.date() if pd.notna(latest_land_date) else "UNKNOWN"
+    logger.info("Latest financial report date: %s", latest_str)
+    logger.info("Latest-quarter financial institutions: %d", len(land_latest))
     logger.info(
         "IDRSSD -> FED_RSSD matched: %d/%d (%.2f%%)",
         join_match_count,
@@ -138,7 +176,7 @@ def prepare_snapshots(
         (join_match_count / max(len(land_latest), 1)) * 100,
     )
     logger.info(
-        "Land banks with location coverage via CERT: %d/%d (%.2f%%)",
+        "Financial institutions with location coverage via CERT: %d/%d (%.2f%%)",
         location_match_count,
         len(land_latest),
         (location_match_count / max(len(land_latest), 1)) * 100,

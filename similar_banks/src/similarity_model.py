@@ -37,6 +37,12 @@ def _safe_pct_diff(a: float, b: float) -> float:
     return abs(a - b) / denom
 
 
+def _fmt_pct(value: float) -> str:
+    if pd.isna(value):
+        return "N/A"
+    return f"{float(value) * 100:.1f}%"
+
+
 @dataclass
 class GutCheckResult:
     passed: bool
@@ -80,59 +86,138 @@ class SimilarBankRecommender:
         peer: Dict[str, Any],
         geo_diag: Dict[str, float],
     ) -> str:
-        reasons: List[str] = []
+        reason_candidates: List[Tuple[float, str]] = []
+        seen_reasons: set[str] = set()
+
+        def add_reason(priority: float, text: str) -> None:
+            if not text or text in seen_reasons:
+                return
+            seen_reasons.add(text)
+            reason_candidates.append((float(priority), text))
+
         size_threshold = float(self.driver_thresholds["size_pct_diff_max"])
         ldr_threshold = float(self.driver_thresholds["loan_to_deposit_abs_diff_max"])
         growth_threshold = float(self.driver_thresholds["growth_abs_diff_max"])
         overlap_threshold = float(self.driver_thresholds["overlap_for_strong_geo"])
 
         size_diff = _safe_pct_diff(subject["total_assets"], peer["total_assets"])
-        if size_diff <= size_threshold:
-            reasons.append(
-                f"Comparable asset size ({_fmt_currency(subject['total_assets'])} vs {_fmt_currency(peer['total_assets'])})"
+        if np.isfinite(size_diff):
+            size_priority = max(0.1, 1.0 - min(size_diff, 1.0))
+            add_reason(
+                size_priority,
+                f"Comparable asset size ({_fmt_currency(subject['total_assets'])} vs {_fmt_currency(peer['total_assets'])})",
             )
 
         ldr_a = subject.get("loan_to_deposit_ratio")
         ldr_b = peer.get("loan_to_deposit_ratio")
-        if pd.notna(ldr_a) and pd.notna(ldr_b) and abs(float(ldr_a) - float(ldr_b)) <= ldr_threshold:
-            reasons.append(
-                f"Similar loan-to-deposit ratio ({float(ldr_a):.2f} vs {float(ldr_b):.2f})"
+        if pd.notna(ldr_a) and pd.notna(ldr_b):
+            ldr_diff = abs(float(ldr_a) - float(ldr_b))
+            add_reason(
+                max(0.1, 1.0 - min(ldr_diff / max(ldr_threshold * 2, 0.01), 1.0)),
+                f"Similar loan-to-deposit ratio ({_fmt_pct(float(ldr_a))} vs {_fmt_pct(float(ldr_b))})",
             )
 
         growth_a = subject.get("avg_3y_assets_yoy_growth")
         growth_b = peer.get("avg_3y_assets_yoy_growth")
-        if (
-            pd.notna(growth_a)
-            and pd.notna(growth_b)
-            and abs(float(growth_a) - float(growth_b)) <= growth_threshold
-        ):
-            reasons.append(
-                f"Aligned 3Y asset growth ({float(growth_a)*100:.1f}% vs {float(growth_b)*100:.1f}%)"
+        if pd.notna(growth_a) and pd.notna(growth_b):
+            growth_diff = abs(float(growth_a) - float(growth_b))
+            add_reason(
+                max(0.05, 1.0 - min(growth_diff / max(growth_threshold * 3, 0.01), 1.0)),
+                f"Aligned 3Y asset growth ({_fmt_pct(float(growth_a))} vs {_fmt_pct(float(growth_b))})",
             )
 
+        lending_mix_features = [
+            ("loan_mix_cre_pct", "CRE"),
+            ("loan_mix_ci_pct", "C&I"),
+            ("loan_mix_residential_mortgage_pct", "Residential mortgage"),
+            ("loan_mix_consumer_pct", "Consumer"),
+            ("loan_mix_agricultural_pct", "Agricultural"),
+            ("loan_mix_construction_pct", "Construction/development"),
+        ]
+        lending_diffs: List[Tuple[float, str]] = []
+        for feat, label in lending_mix_features:
+            a = subject.get(feat)
+            b = peer.get(feat)
+            if pd.notna(a) and pd.notna(b):
+                diff = abs(float(a) - float(b))
+                avg_share = (abs(float(a)) + abs(float(b))) / 2.0
+                if avg_share < 0.02:
+                    continue
+                significance = min(1.0, max(avg_share / 0.08, 0.15))
+                lending_diffs.append(
+                    (
+                        diff / significance,
+                        f"Similar {label} lending mix ({_fmt_pct(float(a))} vs {_fmt_pct(float(b))})",
+                    )
+                )
+        lending_diffs.sort(key=lambda x: x[0])
+        for diff, text in lending_diffs[:2]:
+            add_reason(max(0.1, 1.0 - min(diff / 0.30, 1.0)), text)
+
+        for label, feat in [("Retail deposits", "deposit_mix_retail_pct"), ("Business deposits", "deposit_mix_business_pct")]:
+            a = subject.get(feat)
+            b = peer.get(feat)
+            if pd.notna(a) and pd.notna(b):
+                diff = abs(float(a) - float(b))
+                avg_share = (abs(float(a)) + abs(float(b))) / 2.0
+                significance = min(1.0, max(avg_share / 0.20, 0.25))
+                add_reason(
+                    max(0.1, 1.0 - min((diff / significance) / 0.25, 1.0)),
+                    f"Similar {label.lower()} mix ({_fmt_pct(float(a))} vs {_fmt_pct(float(b))})",
+                )
+
         if geo_diag["market_overlap"] >= overlap_threshold:
-            reasons.append(
-                f"Strong market overlap ({int(geo_diag['shared_markets'])} shared CBSAs)"
+            add_reason(
+                0.95,
+                f"Strong market overlap ({int(geo_diag['shared_markets'])} shared CBSAs)",
             )
         elif geo_diag["markets_a"] >= 20 and geo_diag["markets_b"] >= 20:
-            reasons.append(
-                f"Both broad-footprint banks ({int(geo_diag['markets_a'])} vs {int(geo_diag['markets_b'])} CBSAs)"
+            add_reason(
+                0.6,
+                f"Both broad-footprint banks ({int(geo_diag['markets_a'])} vs {int(geo_diag['markets_b'])} CBSAs)",
             )
 
         if subject["charter_type"] == peer["charter_type"]:
-            reasons.append(f"Same charter type ({subject['charter_type']})")
+            add_reason(0.45, f"Same charter type ({subject['charter_type']})")
 
         if int(subject["has_holding_company"]) == int(peer["has_holding_company"]):
             if int(subject["has_holding_company"]) == 1:
-                reasons.append("Both in holding-company structures")
+                add_reason(0.30, "Both in holding-company structures")
             else:
-                reasons.append("Both stand-alone institutions")
+                add_reason(0.30, "Both stand-alone institutions")
 
-        if len(reasons) < 3:
-            reasons.append("Comparable balance-sheet structure")
-        if len(reasons) < 3:
-            reasons.append("Similar operating profile")
-        return " | ".join(reasons[:3])
+        if subject.get("specialty_group") == peer.get("specialty_group") and str(subject.get("specialty_group")) != "UNKNOWN":
+            add_reason(0.28, f"Same specialty group ({subject.get('specialty_group')})")
+
+        loans_to_assets_a = subject.get("loans_to_assets")
+        loans_to_assets_b = peer.get("loans_to_assets")
+        if pd.notna(loans_to_assets_a) and pd.notna(loans_to_assets_b):
+            add_reason(
+                0.22,
+                f"Comparable loans-to-assets mix ({_fmt_pct(float(loans_to_assets_a))} vs {_fmt_pct(float(loans_to_assets_b))})",
+            )
+
+        deposits_to_assets_a = subject.get("deposits_to_assets")
+        deposits_to_assets_b = peer.get("deposits_to_assets")
+        if pd.notna(deposits_to_assets_a) and pd.notna(deposits_to_assets_b):
+            add_reason(
+                0.20,
+                f"Comparable deposits-to-assets mix ({_fmt_pct(float(deposits_to_assets_a))} vs {_fmt_pct(float(deposits_to_assets_b))})",
+            )
+
+        growth_loans_a = subject.get("avg_3y_loans_yoy_growth")
+        growth_loans_b = peer.get("avg_3y_loans_yoy_growth")
+        if pd.notna(growth_loans_a) and pd.notna(growth_loans_b):
+            add_reason(
+                0.18,
+                f"Aligned 3Y loan growth ({_fmt_pct(float(growth_loans_a))} vs {_fmt_pct(float(growth_loans_b))})",
+            )
+
+        reason_candidates.sort(key=lambda x: x[0], reverse=True)
+        top_reasons = [text for _, text in reason_candidates[:3]]
+        if not top_reasons:
+            top_reasons = ["Asset and lending metrics are numerically similar"]
+        return " | ".join(top_reasons)
 
     def compute(
         self,

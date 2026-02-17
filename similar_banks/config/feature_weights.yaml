@@ -15,7 +15,7 @@ geography:
 
 categorical_weights:
   charter_type: 0.50
-  holding_company: 0.30
+  holding_company: 0.25
   specialty_group: 0.20
 
 driver_thresholds:
@@ -31,6 +31,14 @@ numeric_feature_weights:
   loans_to_assets: 0.80
   deposits_to_assets: 0.80
   loan_to_deposit_ratio: 0.70
+  loan_mix_cre_pct: 2.25
+  loan_mix_ci_pct: 2.25
+  loan_mix_residential_mortgage_pct: 2.25
+  loan_mix_consumer_pct: 2.25
+  loan_mix_agricultural_pct: 2.25
+  loan_mix_construction_pct: 2.25
+  deposit_mix_retail_pct: 1.20
+  deposit_mix_business_pct: 1.20
   asset_growth_cagr_5y: 0.20
   core_deposits_per_fte_ttm: 0.15
   avg_3y_assets_yoy_growth: 0.15

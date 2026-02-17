@@ -109,8 +109,8 @@ def main() -> int:
     summary_lines = [
         "# Data Quality Summary",
         "",
-        f"- Latest land report date: {bundle.latest_land_date.date()}",
-        f"- Land latest institutions: {len(bundle.land_latest):,}",
+        f"- Latest financial report date: {bundle.latest_land_date.date()}",
+        f"- Latest-quarter financial institutions: {len(bundle.land_latest):,}",
         f"- Join key used (financial to metadata): `{bank_id_col}` -> `{institution_rssd_col}`",
         f"- Join coverage (`{bank_id_col}` matched): {join_match:,}/{len(bundle.land_latest):,} ({join_match / max(len(bundle.land_latest), 1) * 100:.2f}%)",
         f"- Join key used (metadata to branches): `{cert_col}` -> `{cert_col}`",

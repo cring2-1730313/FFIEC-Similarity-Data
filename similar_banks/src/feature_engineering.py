@@ -19,16 +19,59 @@ class FeatureSet:
 
 def _first_existing_column(df: pd.DataFrame, candidates: Any) -> Optional[str]:
     if isinstance(candidates, str):
-        return candidates if candidates in df.columns else None
+        if candidates in df.columns:
+            return candidates
+        for suffix in ("_land", "_inst"):
+            candidate = f"{candidates}{suffix}"
+            if candidate in df.columns:
+                return candidate
+        return None
     if isinstance(candidates, list):
         for col in candidates:
-            if col in df.columns:
-                return col
+            resolved = _first_existing_column(df, col)
+            if resolved is not None:
+                return resolved
     return None
 
 
 def _to_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce")
+
+
+def _parse_mixed_date(series: pd.Series) -> pd.Series:
+    parsed = pd.to_datetime(series, errors="coerce")
+    numeric = pd.to_numeric(series, errors="coerce")
+    yyyymmdd_mask = numeric.notna() & numeric.between(19000101, 21991231)
+    if yyyymmdd_mask.any():
+        as_text = numeric[yyyymmdd_mask].round().astype("Int64").astype(str)
+        parsed.loc[yyyymmdd_mask] = pd.to_datetime(as_text, format="%Y%m%d", errors="coerce")
+    return parsed
+
+
+def _resolve_column(
+    df: pd.DataFrame, column: Optional[str], prefer_suffixes: tuple[str, ...] = ()
+) -> Optional[str]:
+    if not column:
+        return None
+    if column in df.columns:
+        return column
+    for suffix in prefer_suffixes:
+        candidate = f"{column}_{suffix}"
+        if candidate in df.columns:
+            return candidate
+    return None
+
+
+def _series_or_default(
+    df: pd.DataFrame,
+    column: Optional[str],
+    default: Any,
+    prefer_suffixes: tuple[str, ...] = (),
+) -> pd.Series:
+    resolved = _resolve_column(df, column, prefer_suffixes=prefer_suffixes)
+    if resolved:
+        return df[resolved]
+    return pd.Series(default, index=df.index)
 
 
 def compute_growth_features(
@@ -48,7 +91,7 @@ def compute_growth_features(
 
     needed_cols = [bank_id_col, report_date_col] + list(growth_metrics.values())
     hist = land_history[needed_cols].copy()
-    hist[report_date_col] = pd.to_datetime(hist[report_date_col], errors="coerce")
+    hist[report_date_col] = _parse_mixed_date(hist[report_date_col])
     hist[bank_id_col] = pd.to_numeric(hist[bank_id_col], errors="coerce").astype("Int64")
 
     for col in growth_metrics.values():
@@ -107,12 +150,19 @@ def engineer_bank_features(
 
     out = pd.DataFrame()
     out["bank_id"] = pd.to_numeric(bank_base[bank_id_col], errors="coerce").astype("Int64")
-    out["subject_name"] = (
-        bank_base.get(institution_name_col)
-        .where(bank_base.get(institution_name_col).notna(), bank_base.get(land_name_col))
-        .fillna("UNKNOWN")
+    institution_name = _series_or_default(
+        bank_base, institution_name_col, np.nan, prefer_suffixes=("inst", "land")
     )
-    out["cert"] = pd.to_numeric(bank_base.get(cert_col), errors="coerce").astype("Int64")
+    land_name = _series_or_default(
+        bank_base, land_name_col, np.nan, prefer_suffixes=("land", "inst")
+    )
+    out["subject_name"] = (
+        institution_name.where(institution_name.notna(), land_name).fillna("UNKNOWN").astype(str)
+    )
+    out["cert"] = pd.to_numeric(
+        _series_or_default(bank_base, cert_col, np.nan, prefer_suffixes=("inst", "land")),
+        errors="coerce",
+    ).astype("Int64")
 
     total_assets_col = financial["total_assets"]
     total_deposits_col = financial["total_deposits"]
@@ -122,13 +172,56 @@ def engineer_bank_features(
     core_deposits_per_fte_col = financial["core_deposits_per_fte"]
     asset_size_bucket_col = financial["asset_size_bucket"]
 
-    out["total_assets"] = _to_numeric(bank_base.get(total_assets_col))
-    out["total_deposits"] = _to_numeric(bank_base.get(total_deposits_col))
-    out["total_loans"] = _to_numeric(bank_base.get(total_loans_col))
-    out["loan_to_deposit_ratio"] = _to_numeric(bank_base.get(loan_to_deposit_col))
-    out["asset_growth_cagr_5y"] = _to_numeric(bank_base.get(asset_growth_cagr_col))
-    out["core_deposits_per_fte_ttm"] = _to_numeric(bank_base.get(core_deposits_per_fte_col))
-    out["asset_size_bucket"] = bank_base.get(asset_size_bucket_col).astype(str)
+    out["total_assets"] = _to_numeric(
+        _series_or_default(bank_base, total_assets_col, np.nan, prefer_suffixes=("land", "inst"))
+    )
+    out["total_deposits"] = _to_numeric(
+        _series_or_default(bank_base, total_deposits_col, np.nan, prefer_suffixes=("land", "inst"))
+    )
+    out["total_loans"] = _to_numeric(
+        _series_or_default(bank_base, total_loans_col, np.nan, prefer_suffixes=("land", "inst"))
+    )
+
+    loan_to_deposit_series = _to_numeric(
+        _series_or_default(bank_base, loan_to_deposit_col, np.nan, prefer_suffixes=("land", "inst"))
+    )
+    ratio_p95 = float(loan_to_deposit_series.quantile(0.95)) if loan_to_deposit_series.notna().any() else np.nan
+    if pd.notna(ratio_p95) and ratio_p95 > 2.0:
+        loan_to_deposit_series = loan_to_deposit_series / 100.0
+    derived_ratio = np.where(
+        out["total_deposits"] > 0,
+        out["total_loans"] / out["total_deposits"],
+        np.nan,
+    )
+    out["loan_to_deposit_ratio"] = loan_to_deposit_series.fillna(pd.Series(derived_ratio, index=bank_base.index))
+
+    out["asset_growth_cagr_5y"] = _to_numeric(
+        _series_or_default(bank_base, asset_growth_cagr_col, np.nan, prefer_suffixes=("land", "inst"))
+    )
+
+    core_dep_raw = _to_numeric(
+        _series_or_default(
+            bank_base, core_deposits_per_fte_col, np.nan, prefer_suffixes=("land", "inst")
+        )
+    )
+    core_col_name = (core_deposits_per_fte_col or "").upper()
+    if "COREDEP" in core_col_name and "FTE" not in core_col_name:
+        out["core_deposits_per_fte_ttm"] = np.where(
+            out["total_deposits"] > 0, core_dep_raw / out["total_deposits"], np.nan
+        )
+    else:
+        out["core_deposits_per_fte_ttm"] = core_dep_raw
+
+    resolved_bucket_col = _resolve_column(
+        bank_base, asset_size_bucket_col, prefer_suffixes=("land", "inst")
+    )
+    if resolved_bucket_col in bank_base.columns:
+        out["asset_size_bucket"] = bank_base[resolved_bucket_col].fillna("UNKNOWN").astype(str)
+    else:
+        bins = [-np.inf, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, np.inf]
+        labels = ["<=100M", "100M-1B", "1B-10B", "10B-100B", "100B+"]
+        out["asset_size_bucket"] = pd.cut(out["total_assets"], bins=bins, labels=labels).astype(str)
+        out["asset_size_bucket"] = out["asset_size_bucket"].replace("nan", "UNKNOWN")
 
     out["log_total_assets"] = np.log1p(out["total_assets"].clip(lower=0))
     out["log_total_deposits"] = np.log1p(out["total_deposits"].clip(lower=0))
@@ -148,11 +241,15 @@ def engineer_bank_features(
             data_gaps.append(f"Missing lending profile column for {label}")
             out[feature_name] = np.nan
             continue
-        out[feature_name] = np.where(
-            out["total_loans"] > 0,
-            _to_numeric(bank_base[source_col]) / out["total_loans"],
-            np.nan,
-        )
+        source = _to_numeric(bank_base[source_col])
+        source_lower = source_col.lower()
+        if "pct" in source_lower or "percent" in source_lower:
+            source_p95 = float(source.quantile(0.95)) if source.notna().any() else np.nan
+            if pd.notna(source_p95) and source_p95 > 1.5:
+                source = source / 100.0
+            out[feature_name] = source
+        else:
+            out[feature_name] = np.where(out["total_loans"] > 0, source / out["total_loans"], np.nan)
 
     for label, candidate_cols in deposit_mix.items():
         feature_name = f"deposit_mix_{label}_pct"
@@ -161,22 +258,43 @@ def engineer_bank_features(
             data_gaps.append(f"Missing deposit mix column for {label}")
             out[feature_name] = np.nan
             continue
-        out[feature_name] = np.where(
-            out["total_deposits"] > 0,
-            _to_numeric(bank_base[source_col]) / out["total_deposits"],
-            np.nan,
-        )
+        source = _to_numeric(bank_base[source_col])
+        source_lower = source_col.lower()
+        if "pct" in source_lower or "percent" in source_lower:
+            source_p95 = float(source.quantile(0.95)) if source.notna().any() else np.nan
+            if pd.notna(source_p95) and source_p95 > 1.5:
+                source = source / 100.0
+            out[feature_name] = source
+        else:
+            out[feature_name] = np.where(
+                out["total_deposits"] > 0, source / out["total_deposits"], np.nan
+            )
+
+    if "deposit_mix_business_pct" in out.columns and out["deposit_mix_business_pct"].isna().all():
+        if "deposit_mix_retail_pct" in out.columns and out["deposit_mix_retail_pct"].notna().any():
+            out["deposit_mix_business_pct"] = 1.0 - out["deposit_mix_retail_pct"]
+
+    if "deposit_mix_retail_pct" in out.columns and out["deposit_mix_retail_pct"].isna().all():
+        if "deposit_mix_business_pct" in out.columns and out["deposit_mix_business_pct"].notna().any():
+            out["deposit_mix_retail_pct"] = 1.0 - out["deposit_mix_business_pct"]
 
     charter_col = institutional["charter_type"]
     holding_col = institutional["holding_company_rssd"]
     specialty_col = institutional["specialty_group"]
 
-    out["charter_type"] = bank_base.get(charter_col).fillna("UNKNOWN").astype(str)
-    out["holding_company_rssd"] = pd.to_numeric(bank_base.get(holding_col), errors="coerce")
+    out["charter_type"] = _series_or_default(
+        bank_base, charter_col, "UNKNOWN", prefer_suffixes=("inst", "land")
+    ).fillna("UNKNOWN").astype(str)
+    out["holding_company_rssd"] = pd.to_numeric(
+        _series_or_default(bank_base, holding_col, np.nan, prefer_suffixes=("inst", "land")),
+        errors="coerce",
+    )
     out["has_holding_company"] = (
         out["holding_company_rssd"].notna() & (out["holding_company_rssd"] > 0)
     ).astype(int)
-    out["specialty_group"] = bank_base.get(specialty_col).fillna("UNKNOWN").astype(str)
+    out["specialty_group"] = _series_or_default(
+        bank_base, specialty_col, "UNKNOWN", prefer_suffixes=("inst", "land")
+    ).fillna("UNKNOWN").astype(str)
 
     growth = compute_growth_features(land_history=land_history, mappings=mappings, logger=logger)
     growth = growth.rename(columns={ids["bank_id"]: "bank_id"})

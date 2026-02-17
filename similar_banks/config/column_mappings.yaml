@@ -1,61 +1,65 @@
 files:
-  land: Land___Clean_FFIEC_Data.csv
+  financial_history: banksuite_financials_last_3y_full.parquet
   locations: Locations__Bank_Suite_.csv
   institutions: Institutions__Bank_Suite_.csv
 
 identifiers:
-  bank_id: IDRSSD
+  bank_id: RSSDID
   institution_rssd: FED_RSSD
   cert: CERT
 
 names:
-  land_name: Financial_Institution_Name
-  institution_name: NAME
+  land_name: NAMEFULL
+  institution_name: NAME_inst
 
 dates:
-  land_report_date: Reporting_Period_End_Date
+  land_report_date: REPDTE
   institution_report_date: REPDTE
   institution_run_date: RUNDATE
   location_run_date: RUNDATE
 
 financial:
-  total_assets: Total_Assets
-  total_deposits: Total_Deposits
-  total_loans: Total_Net_Loans_And_Leases
-  loan_to_deposit_ratio: LOAN_TO_DEPOSIT_RATIO_QTR
+  total_assets: ASSET
+  total_deposits: DEP
+  total_loans: LNLSNET
+  loan_to_deposit_ratio: LOAN_TO_DEPOSIT_RATIO
   asset_growth_cagr_5y: ASSET_GROWTH_CAGR_5Y
-  core_deposits_per_fte: CORE_DEPOSITS_PER_FTE_TTM
+  core_deposits_per_fte: COREDEP
   asset_size_bucket: ASSET_SIZE_BUCKET
 
 lending_profile:
   cre:
-    - CRE_Loans
-    - CRE_LOANS
-    - Commercial_Real_Estate_Loans
+    - Lending_Profile_CRE_Pct
+    - Lending_Profile_CRE_Amt
   ci:
-    - C_I_Loans
-    - C_AND_I_LOANS
-    - Commercial_Industrial_Loans
+    - Lending_Profile_Industrial_Pct
+    - Lending_Profile_Industrial_Amt
+    - LNCI
   residential_mortgage:
-    - Residential_Mortgage_Loans
-    - RESIDENTIAL_MORTGAGE_LOANS
+    - LNRERES
+    - LNRERES2
+    - LNRERES5
   consumer:
-    - Consumer_Loans
-    - CONSUMER_LOANS
+    - Lending_Profile_Other_Pct
+    - Lending_Profile_Other_Amt
+    - LNCONOTH
+    - LNCRCD
+    - LNAUTO
   agricultural:
-    - Agricultural_Loans
-    - AGRICULTURAL_LOANS
+    - Lending_Profile_Agricultural_Pct
+    - Lending_Profile_Agricultural_Amt
+    - LNAG
   construction:
-    - Construction_Development_Loans
-    - CONSTRUCTION_DEVELOPMENT_LOANS
+    - LNRECON2
+    - LNRECON5
+    - LNRECONS
 
 deposit_mix:
   retail:
-    - Retail_Deposits
-    - RETAIL_DEPOSITS
+    - COREDEP
   business:
-    - Business_Deposits
-    - BUSINESS_DEPOSITS
+    - DEPNIDOM
+    - DEPNI
 
 institutional:
   charter_type: CHARTER

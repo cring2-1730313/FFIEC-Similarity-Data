@@ -18,6 +18,8 @@ Thumbs.db
 Land___Clean_FFIEC_Data.csv
 Locations__Bank_Suite_.csv
 Institutions__Bank_Suite_.csv
+banksuite_latest_financials_full.csv
+banksuite_financials_last_3y_full.parquet
 
 # Generated outputs
 similar_banks/output/
