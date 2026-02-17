@@ -2,6 +2,12 @@ model:
   top_n: 7
   candidate_k: 300
 
+asset_size_filter:
+  enabled: true
+  min_ratio: 0.33
+  max_ratio: 3.0
+  backfill_out_of_band: true
+
 weights:
   financial: 0.60
   geographic: 0.30
@@ -28,7 +34,7 @@ driver_thresholds:
   broad_footprint_count_ratio_min: 0.55
 
 numeric_feature_weights:
-  log_total_assets: 1.20
+  log_total_assets: 2.25
   log_total_deposits: 1.00
   log_total_loans: 1.00
   loans_to_assets: 0.80
@@ -42,8 +48,8 @@ numeric_feature_weights:
   loan_mix_construction_pct: 2.25
   deposit_mix_retail_pct: 1.20
   deposit_mix_business_pct: 1.20
-  asset_growth_cagr_5y: 0.20
+  asset_growth_cagr_5y: 0.50
   core_deposits_per_fte_ttm: 0.15
-  avg_3y_assets_yoy_growth: 0.15
-  avg_3y_deposits_yoy_growth: 0.15
-  avg_3y_loans_yoy_growth: 0.15
+  avg_3y_assets_yoy_growth: 0.45
+  avg_3y_deposits_yoy_growth: 0.45
+  avg_3y_loans_yoy_growth: 0.45

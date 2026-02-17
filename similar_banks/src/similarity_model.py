@@ -20,14 +20,15 @@ except ImportError:
 def _fmt_currency(value: float) -> str:
     if pd.isna(value):
         return "N/A"
-    abs_val = abs(value)
+    scaled_value = float(value) * 1000.0
+    abs_val = abs(scaled_value)
     if abs_val >= 1_000_000_000_000:
-        return f"${value/1_000_000_000_000:.1f}T"
+        return f"${scaled_value/1_000_000_000_000:.1f}T"
     if abs_val >= 1_000_000_000:
-        return f"${value/1_000_000_000:.1f}B"
+        return f"${scaled_value/1_000_000_000:.1f}B"
     if abs_val >= 1_000_000:
-        return f"${value/1_000_000:.1f}M"
-    return f"${value:,.0f}"
+        return f"${scaled_value/1_000_000:.1f}M"
+    return f"${scaled_value:,.0f}"
 
 
 def _safe_pct_diff(a: float, b: float) -> float:
@@ -57,6 +58,25 @@ class SimilarBankRecommender:
         self.categorical_weights = weights_config["categorical_weights"]
         self.driver_thresholds = weights_config["driver_thresholds"]
         self.numeric_feature_weights = weights_config.get("numeric_feature_weights", {})
+        asset_filter_cfg = weights_config.get("asset_size_filter", {})
+        self.asset_filter_enabled = bool(asset_filter_cfg.get("enabled", False))
+        self.asset_filter_min_ratio = float(asset_filter_cfg.get("min_ratio", 0.33))
+        self.asset_filter_max_ratio = float(asset_filter_cfg.get("max_ratio", 3.0))
+        self.asset_filter_backfill = bool(asset_filter_cfg.get("backfill_out_of_band", True))
+
+    def _asset_ratio(self, subject_assets: Any, peer_assets: Any) -> float:
+        if pd.isna(subject_assets) or pd.isna(peer_assets):
+            return np.nan
+        peer_val = float(peer_assets)
+        if peer_val <= 0:
+            return np.nan
+        return float(subject_assets) / peer_val
+
+    def _within_asset_band(self, subject_assets: Any, peer_assets: Any) -> bool:
+        ratio = self._asset_ratio(subject_assets, peer_assets)
+        if not np.isfinite(ratio) or ratio <= 0:
+            return False
+        return self.asset_filter_min_ratio <= ratio <= self.asset_filter_max_ratio
 
     def _categorical_similarity(self, subject: Dict[str, Any], peer: Dict[str, Any]) -> float:
         total_weight = 0.0
@@ -270,7 +290,8 @@ class SimilarBankRecommender:
         records = features.to_dict(orient="records")
         out_rows: List[Dict[str, Any]] = []
         for i, subject in enumerate(records):
-            candidates: List[Tuple[float, int, str]] = []
+            candidates_in_band: List[Tuple[float, int, str]] = []
+            candidates_out_band: List[Tuple[float, int, str]] = []
             for dist, j in zip(distances[i], indices[i]):
                 if i == j:
                     continue
@@ -285,9 +306,24 @@ class SimilarBankRecommender:
                     + float(self.weights["categorical"]) * cat_sim
                 )
                 drivers = self._build_similarity_drivers(subject, peer, geo_diag)
-                candidates.append((float(np.clip(score, 0.0, 1.0)), int(j), drivers))
+                scored = (float(np.clip(score, 0.0, 1.0)), int(j), drivers)
 
-            candidates.sort(key=lambda x: x[0], reverse=True)
+                if self.asset_filter_enabled:
+                    if self._within_asset_band(subject.get("total_assets"), peer.get("total_assets")):
+                        candidates_in_band.append(scored)
+                    else:
+                        candidates_out_band.append(scored)
+                else:
+                    candidates_in_band.append(scored)
+
+            candidates_in_band.sort(key=lambda x: x[0], reverse=True)
+            candidates_out_band.sort(key=lambda x: x[0], reverse=True)
+            if self.asset_filter_enabled and self.asset_filter_backfill and len(candidates_in_band) < self.top_n:
+                needed = self.top_n - len(candidates_in_band)
+                candidates = candidates_in_band + candidates_out_band[:needed]
+            else:
+                candidates = candidates_in_band
+
             top = candidates[: self.top_n]
             for rank, (score, peer_idx, drivers) in enumerate(top, start=1):
                 peer = records[peer_idx]
