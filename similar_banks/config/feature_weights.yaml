@@ -1,5 +1,5 @@
 model:
-  top_n: 7
+  top_n: 10
   candidate_k: 300
 
 asset_size_filter:

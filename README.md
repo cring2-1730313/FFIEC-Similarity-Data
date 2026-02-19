@@ -6,7 +6,7 @@ This project builds a **precomputed Similar Banks engine** for U.S. FDIC-insured
 
 From a business (strategy consulting) lens, the tool solves a common decision bottleneck: teams often compare banks using inconsistent “peer sets” built manually. This model creates a **repeatable, explainable, and scalable peer-definition layer** so product, strategy, risk, and relationship teams are working from the same benchmark universe.
 
-The output is a ranked, explainable top-7 peer list for every bank, with drivers that describe *why* banks are similar.
+The output is a ranked, explainable top-10 peer list for every bank, with drivers that describe *why* banks are similar.
 
 ## Why This Is Valuable
 
@@ -31,7 +31,7 @@ The output is a ranked, explainable top-7 peer list for every bank, with drivers
 `similar_banks/output/similar_banks.parquet` with:
 - `subject_idrssd`
 - `subject_name`
-- `similar_rank` (1-7)
+- `similar_rank` (1-10)
 - `similar_idrssd`
 - `similar_name`
 - `similarity_score`
